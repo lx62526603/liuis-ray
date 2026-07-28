@@ -23,18 +23,33 @@ The generated `vless://` URI is a bearer secret: anyone who obtains it receives
 the node credential. Do not publish it, commit it, or paste it into public
 configuration-conversion websites.
 
-## Recommended installation
+## Recommended installation from this private repository
 
-Review the script before running it:
+A private GitHub repository cannot be downloaded anonymously from
+`raw.githubusercontent.com`. On a trusted computer already authenticated with
+GitHub, clone the repository, review the script, and copy it to the VPS:
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/YOUR_GITHUB_USER/YOUR_REPO/v0.1.0/install.sh
+gh repo clone lx62526603/xray-easy
+cd xray-easy
 less install.sh
-sudo bash install.sh --address YOUR_VPS_IPV4 --name my-vps
+scp install.sh root@YOUR_VPS_IPV4:/root/xray-easy-install.sh
+ssh root@YOUR_VPS_IPV4
+sudo bash /root/xray-easy-install.sh --address YOUR_VPS_IPV4 --name my-vps
 ```
 
-Replace the repository URL and release tag after publishing this repository.
-Using a release tag is safer than downloading from a mutable `main` branch.
+If GitHub CLI is installed and authenticated directly on the VPS, it can
+download the private file without exposing a personal access token in shell
+history:
+
+```bash
+gh api \
+  -H "Accept: application/vnd.github.raw+json" \
+  repos/lx62526603/xray-easy/contents/install.sh \
+  > /root/xray-easy-install.sh
+less /root/xray-easy-install.sh
+sudo bash /root/xray-easy-install.sh --address YOUR_VPS_IPV4 --name my-vps
+```
 
 The installer uses TCP port 443 by default and enables `fq` + BBR:
 
