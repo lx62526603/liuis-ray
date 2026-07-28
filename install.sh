@@ -11,18 +11,18 @@ XRAY_PORT=443
 REALITY_SERVER_NAME="www.microsoft.com"
 REALITY_TARGET_PORT=443
 PUBLIC_ADDRESS=""
-NODE_NAME="xray-easy"
+NODE_NAME="liuis-ray"
 ENABLE_BBR=1
 FORCE=0
 
-STATE_DIR="/etc/xray-easy"
+STATE_DIR="/etc/liuis-ray"
 STATE_FILE="${STATE_DIR}/state.env"
 CONFIG_FILE="/usr/local/etc/xray/config.json"
-CLI_FILE="/usr/local/sbin/xray-easy"
+CLI_FILE="/usr/local/sbin/liuis-ray"
 
-log() { printf '\033[1;32m[xray-easy]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[xray-easy] WARN:\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31m[xray-easy] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;32m[liuis-ray]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[liuis-ray] WARN:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[liuis-ray] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
@@ -34,7 +34,7 @@ Options:
   --server-name DOMAIN        REALITY SNI and target host (default: www.microsoft.com)
   --target-port PORT          REALITY target port (default: 443)
   --address HOST              Public IPv4 or domain placed in client links
-  --name NAME                 ASCII node name (default: xray-easy)
+  --name NAME                 ASCII node name (default: liuis-ray)
   --no-bbr                    Do not enable fq + BBR
   --force                     Back up and replace a pre-existing unmanaged config
   -h, --help                  Show this help
@@ -89,7 +89,7 @@ if [[ -n "$PUBLIC_ADDRESS" ]]; then
   is_ipv4 "$PUBLIC_ADDRESS" || is_domain "$PUBLIC_ADDRESS" || die "--address must be an IPv4 address or domain."
 fi
 if [[ -f "$STATE_FILE" ]]; then
-  die "xray-easy is already installed. Run 'xray-easy show' or remove ${STATE_FILE} only if you intend to rebuild it."
+  die "liuis-ray is already installed. Run 'liuis-ray show' or remove ${STATE_FILE} only if you intend to rebuild it."
 fi
 if [[ -s "$CONFIG_FILE" && "$FORCE" -ne 1 ]]; then
   die "An unmanaged Xray config already exists at ${CONFIG_FILE}. Re-run with --force only after reviewing it."
@@ -236,16 +236,16 @@ cat >"$CLI_FILE" <<'CLI_EOF'
 set -Eeuo pipefail
 umask 077
 
-STATE_FILE="/etc/xray-easy/state.env"
+STATE_FILE="/etc/liuis-ray/state.env"
 CONFIG_FILE="/usr/local/etc/xray/config.json"
 
-log() { printf '\033[1;32m[xray-easy]\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31m[xray-easy] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;32m[liuis-ray]\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m[liuis-ray] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 need_root() { [[ "$(id -u)" -eq 0 ]] || die "This command must run as root."; }
 
 load_state() {
   [[ -r "$STATE_FILE" ]] || die "State file not found: $STATE_FILE"
-  # This file is created root-owned with mode 0600 by xray-easy.
+  # This file is created root-owned with mode 0600 by liuis-ray.
   # shellcheck disable=SC1090
   source "$STATE_FILE"
 }
@@ -282,7 +282,7 @@ enable_bbr() {
   if ! sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
     die "This kernel does not expose BBR. Upgrade the VPS kernel and try again."
   fi
-  cat >/etc/sysctl.d/99-xray-easy-bbr.conf <<'EOF'
+  cat >/etc/sysctl.d/99-liuis-ray-bbr.conf <<'EOF'
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
@@ -309,7 +309,7 @@ update_xray() {
 
 usage() {
   cat <<'EOF'
-Usage: xray-easy COMMAND
+Usage: liuis-ray COMMAND
 
 Commands:
   show                              Show the VLESS share URI
@@ -343,7 +343,7 @@ chmod 755 "$CLI_FILE"
 chown root:root "$CLI_FILE"
 
 install -d -m 755 /etc/systemd/system/xray.service.d
-cat >/etc/systemd/system/xray.service.d/20-xray-easy-hardening.conf <<'EOF'
+cat >/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.conf <<'EOF'
 [Service]
 UMask=0077
 NoNewPrivileges=true
@@ -381,4 +381,4 @@ fi
 printf '\n'
 log "Installation completed."
 "$CLI_FILE" show
-printf '\nRun this at any time:\n  sudo xray-easy show\n  sudo xray-easy qr\n'
+printf '\nRun this at any time:\n  sudo liuis-ray show\n  sudo liuis-ray qr\n'

@@ -1,12 +1,12 @@
-# xray-easy
+# liuis-ray
 
-A small, auditable installer for a personal Xray server:
+A small, auditable installer for a personal encrypted tunnel:
 
 - VLESS + TCP + REALITY + Vision
 - No public administration panel
 - Share URI and terminal QR code
 - Optional `fq` + BBR configuration
-- Xray installation delegated to the official XTLS installer
+- Core installation delegated to the official XTLS installer
 
 The current release supports clean Debian 12+ and Ubuntu 22.04+ VPS instances
 using systemd.
@@ -14,41 +14,25 @@ using systemd.
 ## Security model
 
 This project deliberately does **not** expose a web administration panel.
-The Xray server configuration is readable only by root and the Xray service
+The server configuration is readable only by root and the core service
 group. The official XTLS installer is pinned to a reviewed commit and its
 installer SHA-256 is verified before execution. That upstream installer then
-verifies the downloaded Xray release archive.
+verifies the downloaded core release archive.
 
 The generated `vless://` URI is a bearer secret: anyone who obtains it receives
 the node credential. Do not publish it, commit it, or paste it into public
 configuration-conversion websites.
 
-## Recommended installation from this private repository
+## Recommended installation
 
-A private GitHub repository cannot be downloaded anonymously from
-`raw.githubusercontent.com`. On a trusted computer already authenticated with
-GitHub, clone the repository, review the script, and copy it to the VPS:
+Download the versioned installer and review it before execution:
 
 ```bash
-gh repo clone lx62526603/xray-easy
-cd xray-easy
-less install.sh
-scp install.sh root@YOUR_VPS_IPV4:/root/xray-easy-install.sh
-ssh root@YOUR_VPS_IPV4
-sudo bash /root/xray-easy-install.sh --address YOUR_VPS_IPV4 --name my-vps
-```
-
-If GitHub CLI is installed and authenticated directly on the VPS, it can
-download the private file without exposing a personal access token in shell
-history:
-
-```bash
-gh api \
-  -H "Accept: application/vnd.github.raw+json" \
-  repos/lx62526603/xray-easy/contents/install.sh \
-  > /root/xray-easy-install.sh
-less /root/xray-easy-install.sh
-sudo bash /root/xray-easy-install.sh --address YOUR_VPS_IPV4 --name my-vps
+curl -fL \
+  https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.2.0/install.sh \
+  -o liuis-ray-install.sh
+less liuis-ray-install.sh
+sudo bash liuis-ray-install.sh --address YOUR_VPS_IPV4 --name my-vps
 ```
 
 The installer uses TCP port 443 by default and enables `fq` + BBR:
@@ -82,27 +66,27 @@ sudo bash install.sh \
 
 Do not use an arbitrary target merely because it appears in an online tutorial.
 The target should be stable and reachable from the VPS. Avoid Apple/iCloud
-targets, for which recent Xray versions emit warnings.
+targets, for which recent upstream versions emit warnings.
 
 ## Management commands
 
 ```bash
-sudo xray-easy show
-sudo xray-easy qr
-sudo xray-easy status
-sudo xray-easy logs
-sudo xray-easy restart
-sudo xray-easy update
-sudo xray-easy bbr
+sudo liuis-ray show
+sudo liuis-ray qr
+sudo liuis-ray status
+sudo liuis-ray logs
+sudo liuis-ray restart
+sudo liuis-ray update
+sudo liuis-ray bbr
 ```
 
-`xray-easy update` uses the same pinned official XTLS installer. The installer
-queries the latest stable Xray release and verifies the Xray archive digest
+`liuis-ray update` uses the same pinned official XTLS installer. The installer
+queries the latest stable core release and verifies the archive digest
 before replacing the binary.
 
 ## Firewall
 
-If UFW is already active, the installer opens the selected Xray TCP port. It
+If UFW is already active, the installer opens the selected tunnel TCP port. It
 does not enable UFW automatically, because doing so incorrectly can lock you
 out of SSH.
 
@@ -123,9 +107,9 @@ Open the same ports there.
 
 ```text
 /usr/local/etc/xray/config.json
-/etc/xray-easy/state.env
-/usr/local/sbin/xray-easy
-/etc/systemd/system/xray.service.d/20-xray-easy-hardening.conf
+/etc/liuis-ray/state.env
+/usr/local/sbin/liuis-ray
+/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.conf
 ```
 
 The state file and server configuration contain private credentials. Back them
@@ -134,7 +118,7 @@ up securely and never commit them to Git.
 ## Limitations
 
 - IPv4/domain client addresses only in this initial release
-- One Xray client identity
+- One client identity
 - One VLESS REALITY inbound
 - The script does not alter a provider security group
 - BBR requires kernel support; some container-based VPS products do not allow it
