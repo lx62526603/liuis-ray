@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.4.0"
+INSTALLER_VERSION="0.4.1"
 
 PINNED_XRAY_INSTALL_COMMIT="e741a4f56d368afbb9e5be3361b40c4552d3710d"
 PINNED_XRAY_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
@@ -229,14 +229,49 @@ TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf -- "$TMP_DIR"; }
 trap cleanup EXIT
 
+if ! id xray >/dev/null 2>&1; then
+  if ! getent group xray >/dev/null; then
+    groupadd --system xray
+  fi
+  useradd --system --gid xray --home-dir /var/lib/xray \
+    --create-home --shell /usr/sbin/nologin xray
+fi
+XRAY_GROUP="$(id -gn xray)"
+install -d -o root -g "$XRAY_GROUP" -m 750 /usr/local/etc/xray
+if [[ -s "$XRAY_CONFIG_FILE" ]]; then
+  chown root:"$XRAY_GROUP" "$XRAY_CONFIG_FILE"
+  chmod 640 "$XRAY_CONFIG_FILE"
+fi
+install -d -m 755 /etc/systemd/system/xray.service.d
+cat >/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.conf <<EOF
+[Service]
+User=xray
+Group=${XRAY_GROUP}
+UMask=0077
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+EOF
+systemctl daemon-reload
+
 log "Downloading the pinned official XTLS installer..."
 curl -fL --retry 3 --connect-timeout 15 \
   "$XRAY_INSTALL_URL" -o "${TMP_DIR}/xray-install.sh"
 printf '%s  %s\n' "$XRAY_INSTALL_SHA256" "${TMP_DIR}/xray-install.sh" | sha256sum -c -
 
 log "Installing/updating Xray through the official installer..."
-bash "${TMP_DIR}/xray-install.sh" install
+INSTALL_USER=xray bash "${TMP_DIR}/xray-install.sh" install
 [[ -x /usr/local/bin/xray ]] || die "Xray installation did not produce /usr/local/bin/xray."
+if [[ -f /etc/systemd/system/xray.service ]]; then
+  sed -i 's/^[[:space:]]*User[[:space:]]*=.*/User=xray/' /etc/systemd/system/xray.service
+fi
 
 install -d -m 700 "$STATE_DIR"
 
@@ -318,11 +353,6 @@ if [[ "$MANAGED_UPGRADE" -eq 0 ]]; then
 EOF
 
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_TMP"
-  install -d -m 750 /usr/local/etc/xray
-  XRAY_USER="$(systemctl show xray.service -p User --value 2>/dev/null || true)"
-  XRAY_USER="${XRAY_USER:-nobody}"
-  XRAY_GROUP="$(id -gn "$XRAY_USER" 2>/dev/null || true)"
-  XRAY_GROUP="${XRAY_GROUP:-nogroup}"
   install -o root -g "$XRAY_GROUP" -m 640 "$XRAY_CONFIG_TMP" "$XRAY_CONFIG_FILE"
 else
   [[ -s "$XRAY_CONFIG_FILE" ]] || die "Managed state exists but Xray config is missing: ${XRAY_CONFIG_FILE}"
@@ -335,6 +365,9 @@ else
     "$XRAY_CONFIG_FILE"
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi
+install -d -o root -g "$XRAY_GROUP" -m 750 /usr/local/etc/xray
+chown root:"$XRAY_GROUP" "$XRAY_CONFIG_FILE"
+chmod 640 "$XRAY_CONFIG_FILE"
 
 case "$(uname -m)" in
   x86_64|amd64)
@@ -648,7 +681,7 @@ update_cores() {
 
   log "Updating Xray through the pinned official installer..."
   if ! download_verified "$XRAY_INSTALL_URL" "$XRAY_INSTALL_SHA256" "${tmp_dir}/xray-install.sh" ||
-    ! bash "${tmp_dir}/xray-install.sh" install ||
+    ! INSTALL_USER=xray bash "${tmp_dir}/xray-install.sh" install ||
     ! /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"; then
     rm -rf -- "$tmp_dir"
     return 1
@@ -756,22 +789,6 @@ CLI_EOF
 chmod 755 "$CLI_FILE"
 chown root:root "$CLI_FILE"
 ln -sfn "$CLI_FILE" "$LEGACY_CLI_FILE"
-
-install -d -m 755 /etc/systemd/system/xray.service.d
-cat >/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.conf <<'EOF'
-[Service]
-UMask=0077
-Restart=on-failure
-RestartSec=3s
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-RestrictSUIDSGID=true
-LockPersonality=true
-EOF
 
 systemctl daemon-reload
 /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"

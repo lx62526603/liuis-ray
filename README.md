@@ -28,7 +28,7 @@
 ## 一行安装或升级
 
 ```bash
-sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.4.0/install.sh | bash'
+sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.4.1/install.sh | bash'
 ```
 
 第一次安装会生成新的 VLESS 和 Hysteria2 凭据。再次运行同一命令会识别现有的托管安装、保留 VLESS 凭据并补齐或更新 Hysteria2。
@@ -36,7 +36,7 @@ sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62
 如果服务器上已有并非 liuis-ray 管理的 Xray 或 Hysteria2 配置，脚本会停止。确认备份后才可以使用：
 
 ```bash
-sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.4.0/install.sh | bash -s -- --force'
+sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.4.1/install.sh | bash -s -- --force'
 ```
 
 ## 云平台防火墙
@@ -119,6 +119,7 @@ sudo bash install.sh \
 - Hysteria2 使用独立随机认证密码、Salamander 混淆密码和自签证书。
 - 客户端链接包含证书 SHA-256 固定值，避免仅使用 `insecure` 带来的中间人风险。
 - 状态文件为 `/etc/liuis-ray/state.env`，权限为 `0600`。
+- Xray 使用独立的低权限 `xray` 系统用户，并自动修复配置目录和文件权限。
 - Xray 配置采用当前字段名 `raw` 和 `target`。
 - 两个 systemd 服务均设置自动故障重启和基础沙箱限制。
 - 不开启 Web 管理面板、HTTPS 订阅或流量统计 API。
