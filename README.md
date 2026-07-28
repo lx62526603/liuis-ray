@@ -25,14 +25,21 @@ configuration-conversion websites.
 
 ## Recommended installation
 
-Download the versioned installer and review it before execution:
+One-line installation with automatic public IPv4 detection:
+
+```bash
+sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.3.0/install.sh | bash'
+```
+
+The installer tries three IPv4 lookup services in sequence. You do not normally
+need to provide `--address`. To review the script before execution:
 
 ```bash
 curl -fL \
-  https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.2.0/install.sh \
+  https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.3.0/install.sh \
   -o liuis-ray-install.sh
 less liuis-ray-install.sh
-sudo bash liuis-ray-install.sh --address YOUR_VPS_IPV4 --name my-vps
+sudo bash liuis-ray-install.sh
 ```
 
 The installer uses TCP port 443 by default and enables `fq` + BBR:

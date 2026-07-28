@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-PROJECT_VERSION="0.1.0"
+PROJECT_VERSION="0.3.0"
 XRAY_INSTALL_COMMIT="e741a4f56d368afbb9e5be3361b40c4552d3710d"
 XRAY_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
 XRAY_INSTALL_URL="https://raw.githubusercontent.com/XTLS/Xray-install/${XRAY_INSTALL_COMMIT}/install-release.sh"
@@ -56,6 +56,22 @@ is_ipv4() {
   [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ && "$d" =~ ^[0-9]+$ ]] || return 1
   (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 ))
 }
+
+detect_public_ipv4() {
+  local endpoint candidate
+  for endpoint in \
+    "https://api.ipify.org" \
+    "https://ipv4.icanhazip.com" \
+    "https://ifconfig.me/ip"; do
+    candidate="$(curl -4fsS --connect-timeout 5 --max-time 10 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+    if is_ipv4 "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 while (( "$#" )); do
   case "$1" in
     --port) [[ $# -ge 2 ]] || die "--port requires a value"; XRAY_PORT="$2"; shift 2 ;;
@@ -101,8 +117,10 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates curl openssl qrencode
 
 if [[ -z "$PUBLIC_ADDRESS" ]]; then
-  PUBLIC_ADDRESS="$(curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org || true)"
+  log "Detecting the VPS public IPv4 address..."
+  PUBLIC_ADDRESS="$(detect_public_ipv4 || true)"
   is_ipv4 "$PUBLIC_ADDRESS" || die "Could not detect a public IPv4 address. Use --address."
+  log "Detected public IPv4: ${PUBLIC_ADDRESS}"
 fi
 
 log "Checking whether the REALITY target supports TLS 1.3..."
