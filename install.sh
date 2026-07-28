@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.4.1"
+INSTALLER_VERSION="0.4.2"
 
 PINNED_XRAY_INSTALL_COMMIT="e741a4f56d368afbb9e5be3361b40c4552d3710d"
 PINNED_XRAY_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
@@ -16,7 +16,7 @@ HYSTERIA_RELEASE_TAG="app%2Fv${HYSTERIA_VERSION}"
 
 XRAY_PORT=443
 HYSTERIA_PORT=443
-REALITY_SERVER_NAME="www.microsoft.com"
+REALITY_SERVER_NAME="www.bing.com"
 REALITY_TARGET_PORT=443
 HYSTERIA_SNI="www.cloudflare.com"
 PUBLIC_ADDRESS=""
@@ -30,6 +30,7 @@ XRAY_PORT_SET=0
 HYSTERIA_PORT_SET=0
 SERVER_NAME_SET=0
 TARGET_PORT_SET=0
+MIGRATE_MICROSOFT_TARGET=0
 
 STATE_DIR="/etc/liuis-ray"
 STATE_FILE="${STATE_DIR}/state.env"
@@ -165,6 +166,12 @@ if secure_state_file; then
   # This file is created root-owned and non-writable by group/other.
   # shellcheck disable=SC1090
   source "$STATE_FILE"
+
+  if [[ "$SERVER_NAME_SET" -eq 0 && "${REALITY_SERVER_NAME:-}" == "www.microsoft.com" ]]; then
+    REALITY_SERVER_NAME="www.bing.com"
+    MIGRATE_MICROSOFT_TARGET=1
+    log "Migrating the incompatible REALITY target from www.microsoft.com to www.bing.com."
+  fi
 
   [[ "$XRAY_PORT_SET" -eq 0 ]] || XRAY_PORT="$REQUESTED_XRAY_PORT"
   [[ "$HYSTERIA_PORT_SET" -eq 0 ]] || HYSTERIA_PORT="$REQUESTED_HYSTERIA_PORT"
@@ -362,7 +369,12 @@ else
   sed -i \
     -e 's/"network"[[:space:]]*:[[:space:]]*"tcp"/"network": "raw"/g' \
     -e 's/"dest"[[:space:]]*:/"target":/g' \
+    -e 's/"loglevel"[[:space:]]*:[[:space:]]*"debug"/"loglevel": "warning"/g' \
+    -e 's/"show"[[:space:]]*:[[:space:]]*true/"show": false/g' \
     "$XRAY_CONFIG_FILE"
+  if [[ "$MIGRATE_MICROSOFT_TARGET" -eq 1 ]]; then
+    sed -i 's/www\.microsoft\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
+  fi
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi
 install -d -o root -g "$XRAY_GROUP" -m 750 /usr/local/etc/xray
