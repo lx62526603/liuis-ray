@@ -2,21 +2,15 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.5.0"
-
-PINNED_XRAY_INSTALL_COMMIT="e741a4f56d368afbb9e5be3361b40c4552d3710d"
-PINNED_XRAY_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
+INSTALLER_VERSION="0.6.0"
+PINNED_XRAY_VERSION="26.10.21"
 PINNED_HYSTERIA_VERSION="2.9.2"
-
-XRAY_INSTALL_COMMIT="$PINNED_XRAY_INSTALL_COMMIT"
-XRAY_INSTALL_SHA256="$PINNED_XRAY_INSTALL_SHA256"
-XRAY_INSTALL_URL="https://raw.githubusercontent.com/XTLS/Xray-install/${XRAY_INSTALL_COMMIT}/install-release.sh"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
 HYSTERIA_RELEASE_TAG="app%2Fv${HYSTERIA_VERSION}"
 
 XRAY_PORT=443
 HYSTERIA_PORT=443
-REALITY_SERVER_NAME="www.bing.com"
+REALITY_SERVER_NAME="www.cloudflare.com"
 REALITY_TARGET_PORT=443
 HYSTERIA_SNI="www.cloudflare.com"
 PUBLIC_ADDRESS=""
@@ -24,6 +18,7 @@ NODE_NAME="liuis-ray"
 ENABLE_BBR=1
 FORCE=0
 REINSTALL=0
+UNINSTALL=0
 
 ADDRESS_SET=0
 NAME_SET=0
@@ -46,6 +41,12 @@ XRAY_HARDENING_FILE="/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.c
 XRAY_UNIT_FILE="/etc/systemd/system/xray.service"
 HYSTERIA_UNIT_FILE="/etc/systemd/system/hysteria-server.service"
 BACKUP_ROOT="/var/backups/liuis-ray"
+XRAY_BINARY="/usr/local/bin/xray"
+HYSTERIA_BINARY="/usr/local/bin/hysteria"
+XRAY_TEMPLATE_UNIT="/etc/systemd/system/xray@.service"
+XRAY_DATA_DIR="/usr/local/share/xray"
+XRAY_LOG_DIR="/var/log/xray"
+XRAY_LOGROTATE="/etc/logrotate.d/xray"
 
 log() { printf '\033[1;32m[liuis-ray]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[liuis-ray] WARN:\033[0m %s\n' "$*" >&2; }
@@ -54,7 +55,7 @@ die() { printf '\033[1;31m[liuis-ray] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  sudo bash install.sh [options]
+  bash install.sh [options]    (run as root)
 
 Installs or upgrades:
   - VLESS + REALITY + RAW + Vision on TCP 443
@@ -70,11 +71,13 @@ Options:
   --name NAME                 ASCII node name (default: liuis-ray)
   --no-bbr                    Do not enable fq + BBR
   --force                     Back up and replace unmanaged configs
-  --reinstall                 Rebuild a managed installation, keeping credentials
+  --reinstall                 Clean managed installation and create NEW credentials
+  --uninstall                 Back up and remove the managed installation
   -h, --help                  Show this help
 
 Running this installer again upgrades an existing managed installation while
 preserving its client credentials.
+Reinstall and uninstall run immediately without a confirmation prompt.
 EOF
 }
 
@@ -114,17 +117,33 @@ secure_state_file() {
   (( (8#$mode & 0022) == 0 )) || die "Refusing to source writable state: ${STATE_FILE}"
 }
 
-# Shared with the generated management command. Only exact project files are
-# removed; other configs, runtime binaries, accounts and host settings survive.
+# Shared with the management command. Cleanup is restricted to project files.
 managed_files() {
-  printf '%s\n' "$STATE_FILE" "$XRAY_CONFIG_FILE" "$HYSTERIA_CONFIG_FILE" \
+  local path directory
+  printf '%s\n' "$XRAY_CONFIG_FILE" "$HYSTERIA_CONFIG_FILE" \
     "$HYSTERIA_CERT_FILE" "$HYSTERIA_KEY_FILE" "$XRAY_HARDENING_FILE" "$XRAY_UNIT_FILE" \
-    "$HYSTERIA_UNIT_FILE" "$CLI_FILE" "$LEGACY_CLI_FILE"
+    "$HYSTERIA_UNIT_FILE" "$XRAY_TEMPLATE_UNIT" "$XRAY_BINARY" "$HYSTERIA_BINARY" \
+    "$XRAY_DATA_DIR/geoip.dat" "$XRAY_DATA_DIR/geosite.dat" \
+    "$XRAY_LOG_DIR/access.log" "$XRAY_LOG_DIR/error.log" "$XRAY_LOGROTATE"
+  # Remove old per-config backups produced by previous versions, not arbitrary
+  # files in shared config directories. Clean dedicated service drop-ins too.
+  for path in "${XRAY_CONFIG_FILE}.backup."* "${HYSTERIA_CONFIG_FILE}.backup."*; do
+    [[ "$path" =~ \.backup\.[0-9]{8}T[0-9]{6}Z$ && -e "$path" ]] && printf '%s\n' "$path"
+  done
+  for directory in "${XRAY_UNIT_FILE}.d" "${XRAY_TEMPLATE_UNIT}.d" "${HYSTERIA_UNIT_FILE}.d"; do
+    for path in "$directory/"*.conf; do
+      [[ -e "$path" || -L "$path" ]] && printf '%s\n' "$path"
+    done
+  done
+  printf '%s\n' "$CLI_FILE" "$LEGACY_CLI_FILE" "$STATE_FILE"
 }
 
 check_managed_paths() {
   local path parent
+  local -A seen=()
   while IFS= read -r path; do
+    [[ -z "${seen[$path]:-}" ]] || continue
+    seen["$path"]=1
     parent="$(dirname -- "$path")"
     # Do not follow a redirected config/management directory during removal.
     [[ "$(realpath -m -- "$parent")" == "$parent" ]] || {
@@ -145,8 +164,11 @@ check_managed_paths() {
 backup_installation() {
   local path backup_dir
   local -a files=()
+  local -A seen=()
   check_managed_paths || return 1
   while IFS= read -r path; do
+    [[ -z "${seen[$path]:-}" ]] || continue
+    seen["$path"]=1
     if [[ -e "$path" || -L "$path" ]]; then
       files+=("${path#/}")
     fi
@@ -161,6 +183,186 @@ backup_installation() {
   fi
   chmod 600 "${backup_dir}/config.tar.gz" || return 1
   log "Configuration backup: ${backup_dir}/config.tar.gz"
+}
+
+check_service_ownership() {
+  local unit command config state
+  for unit in xray.service hysteria-server.service; do
+    state="$(systemctl show "$unit" -p LoadState --value)" || return 1
+    [[ "$state" != "not-found" ]] || continue
+    command="$(systemctl show "$unit" -p ExecStart --value)" || return 1
+    case "$unit" in
+      xray.service) config="$XRAY_CONFIG_FILE" ;;
+      hysteria-server.service) config="$HYSTERIA_CONFIG_FILE" ;;
+    esac
+    if [[ -n "$command" && "$command" != *"${config}"* ]]; then
+      warn "$unit now references another config; refusing to remove it."
+      return 1
+    fi
+  done
+}
+
+check_exclusive_installation() {
+  local path instances directory name
+  for path in "$(dirname -- "$XRAY_CONFIG_FILE")/"*.json \
+    "$HYSTERIA_CONFIG_DIR/"*.yaml "$HYSTERIA_CONFIG_DIR/"*.yml; do
+    [[ -e "$path" ]] || continue
+    if [[ "$path" != "$XRAY_CONFIG_FILE" && "$path" != "$HYSTERIA_CONFIG_FILE" ]]; then
+      warn "Another configuration shares these runtime files: $path. Cleanup stopped."
+      return 1
+    fi
+  done
+  instances="$(systemctl list-units --all --no-legend --plain 'xray@*.service')" || return 1
+  [[ -z "${instances//[[:space:]]/}" ]] || {
+    warn "Additional Xray instances exist; cleanup stopped."
+    return 1
+  }
+  for directory in "$(dirname -- "$XRAY_UNIT_FILE")" /usr/lib/systemd/system /lib/systemd/system; do
+    for path in "$directory/"*.service; do
+      [[ -f "$path" ]] || continue
+      name="${path##*/}"
+      case "$name" in xray.service|xray@.service|hysteria-server.service) continue ;; esac
+      if grep -Fq -- "$XRAY_BINARY" "$path" || grep -Fq -- "$HYSTERIA_BINARY" "$path"; then
+        warn "Another service shares these runtime files: $path. Cleanup stopped."
+        return 1
+      fi
+    done
+  done
+}
+
+clean_installation() {
+  local unit state path directory
+  local -a files=()
+  local -A seen=()
+  check_service_ownership || return 1
+  check_exclusive_installation || return 1
+  check_managed_paths || return 1
+  # Snapshot the removal list before deleting any file or directory.
+  while IFS= read -r path; do
+    [[ -z "${seen[$path]:-}" ]] || continue
+    seen["$path"]=1
+    files+=("$path")
+  done < <(managed_files)
+  backup_installation || return 1
+  for unit in xray.service hysteria-server.service; do
+    state="$(systemctl show "$unit" -p LoadState --value)" || return 1
+    [[ "$state" != "not-found" ]] || continue
+    systemctl stop "$unit" || return 1
+    systemctl disable "$unit" || return 1
+  done
+  # Never recursively remove config directories, home directories or /var/log.
+  for path in "${files[@]}"; do
+    rm -f -- "$path" || return 1
+  done
+  systemctl daemon-reload || return 1
+  systemctl reset-failed xray.service hysteria-server.service 2>/dev/null || true
+  for directory in "$STATE_DIR" "$HYSTERIA_CONFIG_DIR" "$(dirname -- "$XRAY_CONFIG_FILE")" \
+    "${XRAY_UNIT_FILE}.d" "${XRAY_TEMPLATE_UNIT}.d" "${HYSTERIA_UNIT_FILE}.d" \
+    "$XRAY_DATA_DIR" "$XRAY_LOG_DIR"; do
+    rmdir -- "$directory" 2>/dev/null || true
+  done
+  log "Managed services, binaries, configs, credentials and old config backups removed."
+}
+
+reset_credentials() {
+  unset UUID PRIVATE_KEY PUBLIC_KEY SHORT_ID HYSTERIA_AUTH HYSTERIA_OBFS_PASSWORD HYSTERIA_CERT_PIN
+  MANAGED_UPGRADE=0
+  MIGRATE_MICROSOFT_TARGET=0
+}
+
+select_releases() {
+  XRAY_VERSION="$PINNED_XRAY_VERSION"
+  HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
+  case "$(uname -m)" in
+    x86_64|amd64)
+      HYSTERIA_ARCH=amd64
+      XRAY_ASSET="Xray-linux-64.zip"
+      XRAY_SHA256="0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978"
+      HYSTERIA_SHA256="86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a"
+      ;;
+    aarch64|arm64)
+      HYSTERIA_ARCH=arm64
+      XRAY_ASSET="Xray-linux-arm64-v8a.zip"
+      XRAY_SHA256="d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c"
+      HYSTERIA_SHA256="9ec8f49f4ea554b1cac04e6f3690cea76ff835082e943e54196d7f323fcfba71"
+      ;;
+    *) die "Only amd64 and arm64 are supported." ;;
+  esac
+  XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/${XRAY_ASSET}"
+  HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VERSION}/hysteria-linux-${HYSTERIA_ARCH}"
+}
+
+download_verified() {
+  local url="$1" sha256="$2" output="$3"
+  curl -fL --retry 3 --connect-timeout 15 "$url" -o "$output" || return 1
+  printf '%s  %s\n' "$sha256" "$output" | sha256sum -c -
+}
+
+prepare_payloads() {
+  local directory="$1"
+  download_verified "$XRAY_URL" "$XRAY_SHA256" "$directory/xray.zip" || return 1
+  download_verified "$HYSTERIA_URL" "$HYSTERIA_SHA256" "$directory/hysteria" || return 1
+  unzip -qo "$directory/xray.zip" xray -d "$directory" || return 1
+  chmod 755 "$directory/xray" "$directory/hysteria" || return 1
+  "$directory/xray" version >/dev/null || return 1
+  "$directory/hysteria" version >/dev/null || return 1
+}
+
+prepare_installation() {
+  local directory="$1"
+  prepare_payloads "$directory" || return 1
+  if [[ "$REINSTALL" -eq 1 ]]; then
+    if [[ "$MANAGED_UPGRADE" -eq 1 ]]; then
+      clean_installation || return 1
+    fi
+    reset_credentials
+    log "Clean installation: generating NEW credentials and client links."
+  fi
+}
+
+write_xray_hardening() {
+  install -d -m 755 "$(dirname -- "$XRAY_HARDENING_FILE")" || return 1
+  cat >"$XRAY_HARDENING_FILE" <<EOF
+[Service]
+User=xray
+Group=${XRAY_GROUP}
+UMask=0077
+Restart=on-failure
+RestartSec=3s
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+EOF
+}
+
+verify_services() {
+  local unit attempt current
+  local -A initial_restarts=()
+  for unit in "$@"; do
+    initial_restarts["$unit"]="$(systemctl show "$unit" -p NRestarts --value)" || return 1
+  done
+  # Type=simple can report active before the process fails to bind its port.
+  # Observe a window longer than RestartSec and also catch fast restart loops.
+  for ((attempt = 0; attempt < 5; attempt++)); do
+    sleep 1
+    for unit in "$@"; do
+      current="$(systemctl show "$unit" -p NRestarts --value)" || return 1
+      if ! systemctl --quiet is-active "$unit" || [[ "$current" != "${initial_restarts[$unit]}" ]]; then
+        warn "$unit failed to remain running."
+        journalctl --no-pager -n 60 -u "$unit" >&2 || true
+        return 1
+      fi
+    done
+  done
 }
 
 while (( "$#" )); do
@@ -192,10 +394,12 @@ while (( "$#" )); do
     --no-bbr) ENABLE_BBR=0; shift ;;
     --force) FORCE=1; shift ;;
     --reinstall) REINSTALL=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
+(( REINSTALL + UNINSTALL <= 1 )) || die "Choose reinstall or uninstall, not both."
 
 [[ "$(id -u)" -eq 0 ]] || die "Run this installer as root."
 [[ "$(uname -s)" == "Linux" ]] || die "Only Linux is supported."
@@ -224,9 +428,9 @@ if secure_state_file; then
   source "$STATE_FILE"
 
   if [[ "$SERVER_NAME_SET" -eq 0 && "${REALITY_SERVER_NAME:-}" == "www.microsoft.com" ]]; then
-    REALITY_SERVER_NAME="www.bing.com"
+    REALITY_SERVER_NAME="www.cloudflare.com"
     MIGRATE_MICROSOFT_TARGET=1
-    log "Migrating the incompatible REALITY target from www.microsoft.com to www.bing.com."
+    log "Migrating the incompatible legacy REALITY target to www.cloudflare.com."
   fi
 
   [[ "$XRAY_PORT_SET" -eq 0 ]] || XRAY_PORT="$REQUESTED_XRAY_PORT"
@@ -236,39 +440,32 @@ if secure_state_file; then
   [[ "$ADDRESS_SET" -eq 0 ]] || PUBLIC_ADDRESS="$REQUESTED_ADDRESS"
   [[ "$NAME_SET" -eq 0 ]] || NODE_NAME="$REQUESTED_NODE_NAME"
 
-  XRAY_INSTALL_COMMIT="$PINNED_XRAY_INSTALL_COMMIT"
-  XRAY_INSTALL_SHA256="$PINNED_XRAY_INSTALL_SHA256"
-  XRAY_INSTALL_URL="https://raw.githubusercontent.com/XTLS/Xray-install/${XRAY_INSTALL_COMMIT}/install-release.sh"
   HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
   HYSTERIA_RELEASE_TAG="app%2Fv${HYSTERIA_VERSION}"
   HYSTERIA_PORT="${HYSTERIA_PORT:-443}"
   HYSTERIA_SNI="${HYSTERIA_SNI:-www.cloudflare.com}"
-  log "Existing managed installation detected; upgrading in place."
+  log "Existing managed installation detected."
 fi
 
-if [[ "$REINSTALL" -eq 1 && "$MANAGED_UPGRADE" -ne 1 ]]; then
-  die "Reinstall requires an existing managed state. Use a normal installation instead."
+if [[ "$REINSTALL" -eq 1 && "$SERVER_NAME_SET" -eq 0 ]]; then
+  REALITY_SERVER_NAME="www.cloudflare.com"
+fi
+
+if [[ "$UNINSTALL" -eq 1 ]]; then
+  [[ "$MANAGED_UPGRADE" -eq 1 ]] || die "No managed installation found; nothing was removed."
+  clean_installation || die "Cleanup failed; the recovery backup is retained."
+  log "Uninstalled. System packages, accounts, firewall and BBR settings were kept."
+  exit 0
 fi
 
 if [[ "$MANAGED_UPGRADE" -eq 1 ]]; then
-  # Older state files did not save the private key. Recover it before replacing
-  # anything so a repair never silently rotates the client's public key.
+  # Recover the key for ordinary in-place upgrades of older state files.
   if [[ -z "${PRIVATE_KEY:-}" && -r "$XRAY_CONFIG_FILE" ]]; then
     PRIVATE_KEY="$(awk -F'"' '/"privateKey"[[:space:]]*:/ {print $4; exit}' "$XRAY_CONFIG_FILE")"
   fi
-  if [[ "$REINSTALL" -eq 1 ]]; then
-    [[ "${PRIVATE_KEY:-}" =~ ^[A-Za-z0-9_-]{43}$ ]] ||
-      die "Cannot preserve credentials: private key is missing from both state and config. Restore a backup first."
-    [[ -n "${UUID:-}" && -n "${PUBLIC_KEY:-}" && -n "${SHORT_ID:-}" &&
-       -n "${HYSTERIA_AUTH:-}" && -n "${HYSTERIA_OBFS_PASSWORD:-}" ]] ||
-      die "Cannot reinstall with incomplete saved credentials. Restore a backup first."
-    if [[ -n "${HYSTERIA_CERT_PIN:-}" && (! -s "$HYSTERIA_CERT_FILE" || ! -s "$HYSTERIA_KEY_FILE") ]]; then
-      die "Saved certificate files are missing. Restore them from backup to preserve existing client links."
-    fi
-  fi
 fi
 
-if [[ "$MANAGED_UPGRADE" -eq 1 ]] &&
+if [[ "$MANAGED_UPGRADE" -eq 1 && "$REINSTALL" -eq 0 ]] &&
   (( XRAY_PORT_SET == 1 || SERVER_NAME_SET == 1 || TARGET_PORT_SET == 1 )); then
   die "Changing an existing Xray port/REALITY target during upgrade is not supported. Re-run without those options."
 fi
@@ -290,15 +487,10 @@ if [[ "$MANAGED_UPGRADE" -eq 0 && -s "$HYSTERIA_CONFIG_FILE" && "$FORCE" -ne 1 ]
   die "An unmanaged Hysteria config exists at ${HYSTERIA_CONFIG_FILE}. Review it, then re-run with --force."
 fi
 
-if [[ "$REINSTALL" -eq 1 ]]; then
-  backup_installation || die "Could not back up the managed installation."
-  log "Repairing installation while preserving existing client credentials."
-fi
-
 export DEBIAN_FRONTEND=noninteractive
 log "Installing required packages..."
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl openssl qrencode
+apt-get install -y --no-install-recommends ca-certificates curl openssl qrencode unzip
 
 if [[ -z "$PUBLIC_ADDRESS" ]]; then
   log "Detecting the VPS public IPv4 address..."
@@ -319,6 +511,10 @@ TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf -- "$TMP_DIR"; }
 trap cleanup EXIT
 
+select_releases
+log "Downloading and verifying both runtime components before changing services..."
+prepare_installation "$TMP_DIR" || die "Preparation or cleanup failed; check the messages above."
+
 if ! id xray >/dev/null 2>&1; then
   if ! getent group xray >/dev/null; then
     groupadd --system xray
@@ -332,40 +528,28 @@ if [[ -s "$XRAY_CONFIG_FILE" ]]; then
   chown root:"$XRAY_GROUP" "$XRAY_CONFIG_FILE"
   chmod 640 "$XRAY_CONFIG_FILE"
 fi
-install -d -m 755 /etc/systemd/system/xray.service.d
-cat >/etc/systemd/system/xray.service.d/20-liuis-ray-hardening.conf <<EOF
-[Service]
-User=xray
-Group=${XRAY_GROUP}
-UMask=0077
-Restart=on-failure
-RestartSec=3s
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-RestrictSUIDSGID=true
-LockPersonality=true
-EOF
+write_xray_hardening
 systemctl daemon-reload
 
-log "Downloading the pinned official XTLS installer..."
-curl -fL --retry 3 --connect-timeout 15 \
-  "$XRAY_INSTALL_URL" -o "${TMP_DIR}/xray-install.sh"
-printf '%s  %s\n' "$XRAY_INSTALL_SHA256" "${TMP_DIR}/xray-install.sh" | sha256sum -c -
+log "Installing pinned Xray v${XRAY_VERSION}..."
+systemctl stop xray.service 2>/dev/null || true
+install -o root -g root -m 755 "${TMP_DIR}/xray" "$XRAY_BINARY"
+cat >"$XRAY_UNIT_FILE" <<'EOF'
+[Unit]
+Description=liuis-ray Channel A
+After=network-online.target
+Wants=network-online.target
 
-log "Installing/updating Xray through the official installer..."
-XRAY_INSTALL_ARGS=(install)
-# The shared binary can survive an uninstall. Force the upstream installer to
-# recreate its base unit even if the retained binary is already up to date.
-[[ "$REINSTALL" -ne 1 && -f "$XRAY_UNIT_FILE" ]] || XRAY_INSTALL_ARGS+=(--force)
-INSTALL_USER=xray bash "${TMP_DIR}/xray-install.sh" "${XRAY_INSTALL_ARGS[@]}"
-[[ -x /usr/local/bin/xray ]] || die "Xray installation did not produce /usr/local/bin/xray."
-if [[ -f /etc/systemd/system/xray.service ]]; then
-  sed -i 's/^[[:space:]]*User[[:space:]]*=.*/User=xray/' /etc/systemd/system/xray.service
-fi
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+LimitNOFILE=1048576
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 install -d -m 700 "$STATE_DIR"
 
@@ -381,7 +565,7 @@ if [[ "$MANAGED_UPGRADE" -eq 0 ]]; then
   SHORT_ID="$(openssl rand -hex 8)"
 fi
 
-if [[ "$MANAGED_UPGRADE" -eq 0 || "$REINSTALL" -eq 1 ]]; then
+if [[ "$MANAGED_UPGRADE" -eq 0 ]]; then
   if [[ -s "$XRAY_CONFIG_FILE" ]]; then
     cp -a "$XRAY_CONFIG_FILE" "${XRAY_CONFIG_FILE}.backup.$(date -u +%Y%m%dT%H%M%SZ)"
   fi
@@ -462,7 +646,7 @@ else
     -e 's/"show"[[:space:]]*:[[:space:]]*true/"show": false/g' \
     "$XRAY_CONFIG_FILE"
   if [[ "$MIGRATE_MICROSOFT_TARGET" -eq 1 ]]; then
-    sed -i 's/www\.microsoft\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
+    sed -i 's/www\.microsoft\.com/www.cloudflare.com/g' "$XRAY_CONFIG_FILE"
   fi
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi
@@ -470,25 +654,9 @@ install -d -o root -g "$XRAY_GROUP" -m 750 "$(dirname -- "$XRAY_CONFIG_FILE")"
 chown root:"$XRAY_GROUP" "$XRAY_CONFIG_FILE"
 chmod 640 "$XRAY_CONFIG_FILE"
 
-case "$(uname -m)" in
-  x86_64|amd64)
-    HYSTERIA_ARCH="amd64"
-    HYSTERIA_SHA256="86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a"
-    ;;
-  aarch64|arm64)
-    HYSTERIA_ARCH="arm64"
-    HYSTERIA_SHA256="9ec8f49f4ea554b1cac04e6f3690cea76ff835082e943e54196d7f323fcfba71"
-    ;;
-  *)
-    die "Hysteria2 is supported by this installer only on amd64 and arm64."
-    ;;
-esac
-HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/${HYSTERIA_RELEASE_TAG}/hysteria-linux-${HYSTERIA_ARCH}"
-
-log "Downloading pinned Hysteria2 v${HYSTERIA_VERSION}..."
-curl -fL --retry 3 --connect-timeout 15 "$HYSTERIA_URL" -o "${TMP_DIR}/hysteria"
-printf '%s  %s\n' "$HYSTERIA_SHA256" "${TMP_DIR}/hysteria" | sha256sum -c -
-install -o root -g root -m 755 "${TMP_DIR}/hysteria" /usr/local/bin/hysteria
+log "Installing pinned Hysteria2 v${HYSTERIA_VERSION}..."
+systemctl stop hysteria-server.service 2>/dev/null || true
+install -o root -g root -m 755 "${TMP_DIR}/hysteria" "$HYSTERIA_BINARY"
 
 if ! getent group hysteria >/dev/null; then
   groupadd --system hysteria
@@ -585,9 +753,9 @@ EOF
 save_state() {
   {
     printf 'PROJECT_VERSION=%q\n' "$INSTALLER_VERSION"
-    printf 'XRAY_INSTALL_COMMIT=%q\n' "$XRAY_INSTALL_COMMIT"
-    printf 'XRAY_INSTALL_SHA256=%q\n' "$XRAY_INSTALL_SHA256"
-    printf 'XRAY_INSTALL_URL=%q\n' "$XRAY_INSTALL_URL"
+    printf 'XRAY_VERSION=%q\n' "$XRAY_VERSION"
+    printf 'XRAY_URL=%q\n' "$XRAY_URL"
+    printf 'XRAY_SHA256=%q\n' "$XRAY_SHA256"
     printf 'HYSTERIA_VERSION=%q\n' "$HYSTERIA_VERSION"
     printf 'HYSTERIA_ARCH=%q\n' "$HYSTERIA_ARCH"
     printf 'HYSTERIA_SHA256=%q\n' "$HYSTERIA_SHA256"
@@ -614,7 +782,8 @@ save_state
 
 {
 printf '#!/usr/bin/env bash\n'
-declare -f managed_files check_managed_paths backup_installation
+declare -f managed_files check_managed_paths backup_installation check_service_ownership \
+  check_exclusive_installation clean_installation verify_services download_verified prepare_payloads
 printf 'CLI_VERSION=%q\n' "$INSTALLER_VERSION"
 cat <<'CLI_EOF'
 set -Euo pipefail
@@ -633,6 +802,12 @@ HYSTERIA_UNIT_FILE="/etc/systemd/system/hysteria-server.service"
 CLI_FILE="/usr/local/sbin/liuisray"
 LEGACY_CLI_FILE="/usr/local/sbin/liuis-ray"
 BACKUP_ROOT="/var/backups/liuis-ray"
+XRAY_BINARY="/usr/local/bin/xray"
+HYSTERIA_BINARY="/usr/local/bin/hysteria"
+XRAY_TEMPLATE_UNIT="/etc/systemd/system/xray@.service"
+XRAY_DATA_DIR="/usr/local/share/xray"
+XRAY_LOG_DIR="/var/log/xray"
+XRAY_LOGROTATE="/etc/logrotate.d/xray"
 
 green='\033[1;32m'
 yellow='\033[1;33m'
@@ -760,18 +935,20 @@ restart_services() {
   case "$target" in
     xray)
       /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE" || return 1
-      systemctl restart xray
+      systemctl restart xray || return 1
+      verify_services xray || return 1
       ;;
     hy2|hysteria2)
-      systemctl restart hysteria-server
+      systemctl restart hysteria-server || return 1
+      verify_services hysteria-server || return 1
       ;;
     all)
       /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE" || return 1
-      systemctl restart xray hysteria-server
+      systemctl restart xray hysteria-server || return 1
+      verify_services xray hysteria-server || return 1
       ;;
     *) warn "Use: liuisray restart [xray|hy2|all]"; return 1 ;;
   esac
-  sleep 1
   show_status
 }
 
@@ -784,58 +961,44 @@ show_logs() {
   esac
 }
 
-download_verified() {
-  local url="$1" sha256="$2" output="$3"
-  curl -fL --retry 3 --connect-timeout 15 "$url" -o "$output" || return 1
-  printf '%s  %s\n' "$sha256" "$output" | sha256sum -c -
-}
-
 update_cores() {
-  load_state
+  load_state || return 1
   local tmp_dir
-  tmp_dir="$(mktemp -d)"
-
-  log "Updating Xray through the pinned official installer..."
-  if ! download_verified "$XRAY_INSTALL_URL" "$XRAY_INSTALL_SHA256" "${tmp_dir}/xray-install.sh" ||
-    ! INSTALL_USER=xray bash "${tmp_dir}/xray-install.sh" install ||
-    ! /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"; then
+  tmp_dir="$(mktemp -d)" || return 1
+  log "Preparing the pinned runtime components..."
+  if ! prepare_payloads "$tmp_dir" ||
+    ! "$tmp_dir/xray" run -test -config "$XRAY_CONFIG_FILE"; then
+    rm -rf -- "$tmp_dir"
+    return 1
+  fi
+  if ! systemctl stop xray hysteria-server ||
+    ! install -o root -g root -m 755 "$tmp_dir/xray" "$XRAY_BINARY" ||
+    ! install -o root -g root -m 755 "$tmp_dir/hysteria" "$HYSTERIA_BINARY"; then
+    systemctl start xray hysteria-server || true
     rm -rf -- "$tmp_dir"
     return 1
   fi
 
-  log "Reinstalling pinned Hysteria2 v${HYSTERIA_VERSION}..."
-  if ! download_verified "$HYSTERIA_URL" "$HYSTERIA_SHA256" "${tmp_dir}/hysteria"; then
+  if ! systemctl restart xray hysteria-server || ! verify_services xray hysteria-server; then
     rm -rf -- "$tmp_dir"
     return 1
   fi
-  install -o root -g root -m 755 "${tmp_dir}/hysteria" /usr/local/bin/hysteria
-
-  systemctl restart xray hysteria-server
   rm -rf -- "$tmp_dir"
-  sleep 1
   show_status
 }
 
-confirm_action() {
-  local action="$1" option="${2:-}" answer
-  case "$option" in
-    --yes) return 0 ;;
-    "") ;;
-    *) warn "Unknown option: $option (use --yes to confirm non-interactively)"; return 1 ;;
+check_lifecycle_option() {
+  # Accept the old flag for existing automation; neither command prompts now.
+  case "${1:-}" in
+    ""|--yes) return 0 ;;
+    *) warn "Unknown option: $1"; return 1 ;;
   esac
-  # The menu reads stdin, but explicit confirmation must come from a terminal.
-  if ! { printf '\n输入 %s 确认，其他内容取消：' "$action" >/dev/tty &&
-         IFS= read -r answer </dev/tty; } 2>/dev/null; then
-    warn "Confirmation requires a terminal. For automation use --yes."
-    return 1
-  fi
-  [[ "$answer" == "$action" ]] || { log "已取消。"; return 1; }
 }
 
 reinstall_services() {
   load_state || return 1
-  warn "重新安装会重建本项目配置，覆盖手动修改；保留连接凭据并先备份。"
-  confirm_action REINSTALL "${1:-}" || return 1
+  check_lifecycle_option "${1:-}" || return 1
+  warn "开始全新重装：清理旧服务、程序、配置及凭据；安装后请重新导入新链接。"
   local tmp_dir result=0
   [[ "$CLI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   tmp_dir="$(mktemp -d)" || return 1
@@ -851,50 +1014,12 @@ reinstall_services() {
   return "$result"
 }
 
-check_service_ownership() {
-  local unit command config state
-  for unit in xray.service hysteria-server.service; do
-    state="$(systemctl show "$unit" -p LoadState --value)" || return 1
-    [[ "$state" != "not-found" ]] || continue
-    command="$(systemctl show "$unit" -p ExecStart --value)" || return 1
-    case "$unit" in
-      xray.service) config="$XRAY_CONFIG_FILE" ;;
-      hysteria-server.service) config="$HYSTERIA_CONFIG_FILE" ;;
-    esac
-    # A missing unit is fine during cleanup of a damaged installation. A unit
-    # that now runs a different config must not be stopped or removed.
-    if [[ -n "$command" && "$command" != *"${config}"* ]]; then
-      warn "$unit now references another config; refusing to remove it."
-      return 1
-    fi
-  done
-}
-
 uninstall_services() {
   load_state || return 1
-  check_service_ownership || return 1
-  check_managed_paths || return 1
-  warn "卸载将停止本项目服务并删除托管配置及管理命令；会先备份。"
-  warn "保留公共运行文件、依赖、系统账户、防火墙规则及 BBR 设置。"
-  confirm_action UNINSTALL "${1:-}" || return 1
-  backup_installation || return 1
-  local unit state path
-  for unit in xray.service hysteria-server.service; do
-    state="$(systemctl show "$unit" -p LoadState --value)" || return 1
-    [[ "$state" != "not-found" ]] || continue
-    systemctl stop "$unit" || return 1
-    systemctl disable "$unit" || return 1
-  done
-  # No recursive deletion: unrelated configs and old backup files stay intact.
-  while IFS= read -r path; do
-    rm -f -- "$path" || return 1
-  done < <(managed_files)
-  systemctl daemon-reload || return 1
-  systemctl reset-failed xray.service hysteria-server.service 2>/dev/null || true
-  rmdir -- "$STATE_DIR" "$HYSTERIA_CONFIG_DIR" \
-    "$(dirname -- "$XRAY_CONFIG_FILE")" "$(dirname -- "$XRAY_HARDENING_FILE")" 2>/dev/null || true
-  log "本项目服务、托管配置和管理命令已卸载。配置可从上方备份恢复。"
-  log "共享运行文件与系统设置已保留；再次运行安装命令可全新安装。"
+  check_lifecycle_option "${1:-}" || return 1
+  clean_installation || return 1
+  log "本项目已卸载；恢复备份保留在 /var/backups/liuis-ray/。"
+  log "系统依赖、账户、防火墙规则和 BBR 设置已保留。"
 }
 
 pause_menu() {
@@ -926,8 +1051,8 @@ EOF
   7) 查看 Hysteria2 日志
   8) 启用并检查 fq + BBR
   9) 更新代理核心
-  10) 重新安装（保留凭据，先备份）
-  11) 卸载（先备份）
+  10) 全新重装（清理旧配置，生成新链接，直接执行）
+  11) 卸载清理（直接执行）
   0) 退出
 EOF
 }
@@ -948,7 +1073,7 @@ menu() {
       7) show_logs hy2; pause_menu ;;
       8) enable_bbr; pause_menu ;;
       9) update_cores; pause_menu ;;
-      10) reinstall_services; pause_menu ;;
+      10) reinstall_services; return $? ;;
       11) if uninstall_services; then return 0; fi; pause_menu ;;
       0) exit 0 ;;
       *) warn "无效选项：${choice}"; sleep 1 ;;
@@ -968,11 +1093,13 @@ Commands:
   status                       Show services, ports and BBR
   logs [xray|hy2|all]          Show recent logs
   restart [xray|hy2|all]       Validate and restart services
-  update                       Update using pinned upstream installers
-  reinstall [--yes]            Back up and rebuild, preserving credentials
-  uninstall [--yes]            Back up and remove managed services and configs
+  update                       Install the pinned runtime components
+  reinstall                    Clean and install afresh, with NEW credentials
+  uninstall                    Remove managed services, binaries and configs
   bbr                          Enable and verify fq + BBR
   menu                         Open the interactive menu
+
+Reinstall and uninstall run immediately, without a confirmation prompt.
 EOF
 }
 
@@ -1001,14 +1128,7 @@ systemctl daemon-reload
 /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 systemctl enable xray hysteria-server
 systemctl restart xray hysteria-server
-sleep 1
-
-for service in xray hysteria-server; do
-  if ! systemctl --quiet is-active "$service"; then
-    journalctl --no-pager -n 80 -u "$service" >&2
-    die "${service} failed to start."
-  fi
-done
+verify_services xray hysteria-server || die "Services failed the startup stability check."
 
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
   log "UFW is active; opening TCP ${XRAY_PORT} and UDP ${HYSTERIA_PORT}."
@@ -1027,4 +1147,4 @@ fi
 printf '\n'
 log "Installation/upgrade completed."
 "$CLI_FILE" show
-printf '\n管理面板：\n  sudo liuisray\n'
+printf '\n管理面板：\n  liuisray\n'
