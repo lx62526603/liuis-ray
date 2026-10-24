@@ -34,7 +34,7 @@ sudo apt install -y ca-certificates curl
 ## 安装或升级
 
 ```bash
-sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.4.2/install.sh | bash'
+sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.5.0/install.sh | bash'
 ```
 
 再次运行同一命令会识别已有的托管安装，保留现有连接凭据并完成必要迁移。
@@ -75,6 +75,8 @@ liuisray
 5. 查看近期日志
 6. 检查系统网络调度设置
 7. 更新运行组件
+8. 重新安装（保留连接凭据，先备份）
+9. 卸载（先备份）
 
 常用非交互命令：
 
@@ -86,6 +88,8 @@ sudo liuisray restart
 sudo liuisray logs all
 sudo liuisray update
 sudo liuisray bbr
+sudo liuisray reinstall
+sudo liuisray uninstall
 ```
 
 ## 自定义
@@ -127,9 +131,26 @@ sudo ss -lntup | grep ':443'
 
 具体实现、固定版本及校验值均可在 [`install.sh`](./install.sh) 中审计。
 
-## 卸载
+## 重新安装与卸载
 
-项目暂不提供自动卸载，以避免误删服务器上被其他程序复用的配置。删除前请先备份，并确认相关服务、端口及 `/etc/liuis-ray/` 不再使用。
+已有安装先运行上方安装命令，更新管理菜单。在 `liuisray` 中选择 `10` 重新安装，选择 `11` 卸载；也可直接运行：
+
+```bash
+sudo liuisray reinstall
+sudo liuisray uninstall
+```
+
+两项操作都需要输入提示中的确认词。自动化执行时可添加 `--yes`。
+
+重新安装会从当前管理工具对应的固定版本下载脚本，重新安装运行组件并重建本项目配置，覆盖手动调整。它保留地址、端口、连接凭据和证书；关键凭据或证书缺失时会停止，避免悄悄改变已有连接链接。
+
+卸载会停止并禁用本项目服务，删除托管配置、服务文件和管理命令。其他配置文件、旧备份、共享运行文件、系统账户、系统依赖、防火墙规则和系统网络调度设置会保留。再次安装会生成新的连接凭据，客户端需要重新导入。
+
+两项操作都会先将配置和管理文件备份到 `/var/backups/liuis-ray/<时间与随机后缀>/config.tar.gz`，备份失败时停止。备份含连接凭据，仅供 root 访问；卸载后备份仍保留。可先用下面的命令查看内容（替换实际路径）：
+
+```bash
+sudo tar -tzf /var/backups/liuis-ray/实际备份目录/config.tar.gz
+```
 
 ## License
 
