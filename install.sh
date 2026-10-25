@@ -10,7 +10,7 @@ HYSTERIA_RELEASE_TAG="app%2Fv${HYSTERIA_VERSION}"
 
 XRAY_PORT=443
 HYSTERIA_PORT=443
-REALITY_SERVER_NAME="www.cloudflare.com"
+REALITY_SERVER_NAME="www.bing.com"
 REALITY_TARGET_PORT=443
 HYSTERIA_SNI="www.cloudflare.com"
 PUBLIC_ADDRESS=""
@@ -428,9 +428,9 @@ if secure_state_file; then
   source "$STATE_FILE"
 
   if [[ "$SERVER_NAME_SET" -eq 0 && "${REALITY_SERVER_NAME:-}" == "www.microsoft.com" ]]; then
-    REALITY_SERVER_NAME="www.cloudflare.com"
+    REALITY_SERVER_NAME="www.bing.com"
     MIGRATE_MICROSOFT_TARGET=1
-    log "Migrating the incompatible legacy REALITY target to www.cloudflare.com."
+    log "Migrating the incompatible legacy REALITY target to www.bing.com."
   fi
 
   [[ "$XRAY_PORT_SET" -eq 0 ]] || XRAY_PORT="$REQUESTED_XRAY_PORT"
@@ -448,7 +448,7 @@ if secure_state_file; then
 fi
 
 if [[ "$REINSTALL" -eq 1 && "$SERVER_NAME_SET" -eq 0 ]]; then
-  REALITY_SERVER_NAME="www.cloudflare.com"
+  REALITY_SERVER_NAME="www.bing.com"
 fi
 
 if [[ "$UNINSTALL" -eq 1 ]]; then
@@ -646,7 +646,7 @@ else
     -e 's/"show"[[:space:]]*:[[:space:]]*true/"show": false/g' \
     "$XRAY_CONFIG_FILE"
   if [[ "$MIGRATE_MICROSOFT_TARGET" -eq 1 ]]; then
-    sed -i 's/www\.microsoft\.com/www.cloudflare.com/g' "$XRAY_CONFIG_FILE"
+    sed -i 's/www\.microsoft\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
   fi
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi
