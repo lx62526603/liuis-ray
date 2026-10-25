@@ -31,4 +31,18 @@ for target in www.cloudflare.com www.microsoft.com www.bing.com custom.example; 
     grep -Fq '"id":"keep-uuid","privateKey":"keep-key","shortIds":["keep-sid"]' "$XRAY_CONFIG_FILE"
   done
 done
+for minimum in absent 1.0.0 26.3.27; do
+  printf '{\n  "realitySettings": {\n' >"$XRAY_CONFIG_FILE"
+  if [[ "$minimum" != absent ]]; then
+    printf '    "minClientVer": "%s",\n' "$minimum" >>"$XRAY_CONFIG_FILE"
+  fi
+  printf '    "target": "www.bing.com:443",\n    "privateKey": "keep-key"\n  }\n}\n' >>"$XRAY_CONFIG_FILE"
+  source <(sed -n '/^  if ! grep -q .*minClientVer/,/^  fi$/p' install.sh)
+  expected="$minimum"
+  [[ "$minimum" != absent ]] || expected=1.0.0
+  grep -Fq "\"minClientVer\": \"$expected\"" "$XRAY_CONFIG_FILE"
+  [[ "$(grep -c '"minClientVer"' "$XRAY_CONFIG_FILE")" == 1 ]]
+  grep -Fq '"privateKey": "keep-key"' "$XRAY_CONFIG_FILE"
+done
 printf 'PASS: defaults, saved-target migration, custom targets and credentials\n'
+printf 'PASS: third-party client version compatibility and explicit limits\n'

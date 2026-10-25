@@ -15,10 +15,12 @@ apt-get update && apt-get install -y ca-certificates curl
 ```
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash'
 ```
 
 普通升级保留连接凭据。两个运行组件均使用固定版本的官方发行文件，并验证 SHA-256；下载校验通过后才修改现有服务。
+
+v0.6.2 将 Xray 固定版本从 26.10.21 回退到 26.7.28，用于客户端兼容性对照；Hysteria2 仍为 2.9.2。Reality 显式使用 `minClientVer: "1.0.0"`，避免旧内核默认的版本门槛拒绝第三方客户端，密钥及 Short ID 认证不变；已有的显式版本限制保留。已有安装运行上面的普通升级命令即可回退，保留连接凭据和证书，不要使用 `--reinstall`。v0.5.0 未固定 Xray 内核版本，因此本次不代表恢复每台服务器最初安装的精确版本。
 
 v0.6.1 将已有 Cloudflare / Microsoft Reality 目标迁移到 Bing，保留 UUID、密钥和 Short ID。升级后请同步客户端的 SNI 为 `www.bing.com`，或重新导入生成的链接；Hysteria2 的 SNI 不变。
 
@@ -59,7 +61,7 @@ liuisray uninstall
 已有旧版也可以直接执行这一行，无需先进入旧菜单：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash -s -- --reinstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash -s -- --reinstall'
 ```
 
 先下载、校验并检查新组件，再备份旧安装，停止服务，清理本项目旧文件，最后全新安装。地址、节点名称和端口沿用已保存设置，也可通过参数修改；连接凭据、密钥和证书全部重新生成，客户端必须重新导入新链接。
@@ -75,7 +77,7 @@ liuisray uninstall
 旧版本尚无此命令时，也可用新脚本直接卸载：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash -s -- --uninstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash -s -- --uninstall'
 ```
 
 与重装使用同一套清理逻辑。系统依赖、系统账户、云平台及本机防火墙规则、系统网络调度设置、公共日志和其他项目文件保留。

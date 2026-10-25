@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.6.1"
-PINNED_XRAY_VERSION="26.10.21"
+INSTALLER_VERSION="0.6.2"
+PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
 HYSTERIA_RELEASE_TAG="app%2Fv${HYSTERIA_VERSION}"
@@ -277,13 +277,13 @@ select_releases() {
     x86_64|amd64)
       HYSTERIA_ARCH=amd64
       XRAY_ASSET="Xray-linux-64.zip"
-      XRAY_SHA256="0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978"
+      XRAY_SHA256="8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40"
       HYSTERIA_SHA256="86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a"
       ;;
     aarch64|arm64)
       HYSTERIA_ARCH=arm64
       XRAY_ASSET="Xray-linux-arm64-v8a.zip"
-      XRAY_SHA256="d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c"
+      XRAY_SHA256="f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501"
       HYSTERIA_SHA256="9ec8f49f4ea554b1cac04e6f3690cea76ff835082e943e54196d7f323fcfba71"
       ;;
     *) die "Only amd64 and arm64 are supported." ;;
@@ -598,6 +598,7 @@ if [[ "$MANAGED_UPGRADE" -eq 0 ]]; then
         "security": "reality",
         "realitySettings": {
           "show": false,
+          "minClientVer": "1.0.0",
           "target": "${REALITY_SERVER_NAME}:${REALITY_TARGET_PORT}",
           "xver": 0,
           "serverNames": [
@@ -649,6 +650,10 @@ else
   if [[ "$MIGRATE_REALITY_TARGET" -eq 1 ]]; then
     sed -i -e 's/www\.microsoft\.com/www.bing.com/g' \
       -e 's/www\.cloudflare\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
+  fi
+  # The pinned core otherwise rejects third-party clients by version alone.
+  if ! grep -q '"minClientVer"[[:space:]]*:' "$XRAY_CONFIG_FILE"; then
+    sed -i '/"realitySettings"[[:space:]]*:[[:space:]]*{/a\          "minClientVer": "1.0.0",' "$XRAY_CONFIG_FILE"
   fi
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi

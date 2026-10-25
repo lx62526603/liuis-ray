@@ -38,6 +38,7 @@ chown() { return 0; }
 sed -n '/^if \[\[ "\$MANAGED_UPGRADE" -eq 0 \]\]; then/,/^log "Installing pinned Hysteria2/p' install.sh |
   sed '$d; s|/usr/local/bin/xray|run_core|g' >"$TEST_DIR/render-config"
 source "$TEST_DIR/render-config"
+grep -q '"minClientVer": "1.0.0"' "$XRAY_CONFIG_FILE"
 derived="$(run_core x25519 -i "$PRIVATE_KEY" | awk -F': ' '/^(Password|PublicKey)( \(PublicKey\))?:/ {print $2; exit}')"
 [[ "$derived" == "$PUBLIC_KEY" ]] || { printf 'FAIL: generated key pair mismatch\n' >&2; exit 1; }
 source <(sed -n '/^build_vless_uri() {/,/^}/p' install.sh)
