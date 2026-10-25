@@ -15,10 +15,12 @@ apt-get update && apt-get install -y ca-certificates curl
 ```
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.0/install.sh | bash'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash'
 ```
 
 普通升级保留连接凭据。两个运行组件均使用固定版本的官方发行文件，并验证 SHA-256；下载校验通过后才修改现有服务。
+
+v0.6.1 将已有 Cloudflare / Microsoft Reality 目标迁移到 Bing，保留 UUID、密钥和 Short ID。升级后请同步客户端的 SNI 为 `www.bing.com`，或重新导入生成的链接；Hysteria2 的 SNI 不变。
 
 云平台防火墙需要放行 TCP 443 与 UDP 443。使用自定义端口时放行对应端口。已启用的 UFW 会自动添加本机规则。
 
@@ -57,7 +59,7 @@ liuisray uninstall
 已有旧版也可以直接执行这一行，无需先进入旧菜单：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.0/install.sh | bash -s -- --reinstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash -s -- --reinstall'
 ```
 
 先下载、校验并检查新组件，再备份旧安装，停止服务，清理本项目旧文件，最后全新安装。地址、节点名称和端口沿用已保存设置，也可通过参数修改；连接凭据、密钥和证书全部重新生成，客户端必须重新导入新链接。
@@ -73,7 +75,7 @@ liuisray uninstall
 旧版本尚无此命令时，也可用新脚本直接卸载：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.0/install.sh | bash -s -- --uninstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.1/install.sh | bash -s -- --uninstall'
 ```
 
 与重装使用同一套清理逻辑。系统依赖、系统账户、云平台及本机防火墙规则、系统网络调度设置、公共日志和其他项目文件保留。

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.6.0"
+INSTALLER_VERSION="0.6.1"
 PINNED_XRAY_VERSION="26.10.21"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -26,7 +26,7 @@ XRAY_PORT_SET=0
 HYSTERIA_PORT_SET=0
 SERVER_NAME_SET=0
 TARGET_PORT_SET=0
-MIGRATE_MICROSOFT_TARGET=0
+MIGRATE_REALITY_TARGET=0
 
 STATE_DIR="/etc/liuis-ray"
 STATE_FILE="${STATE_DIR}/state.env"
@@ -267,7 +267,7 @@ clean_installation() {
 reset_credentials() {
   unset UUID PRIVATE_KEY PUBLIC_KEY SHORT_ID HYSTERIA_AUTH HYSTERIA_OBFS_PASSWORD HYSTERIA_CERT_PIN
   MANAGED_UPGRADE=0
-  MIGRATE_MICROSOFT_TARGET=0
+  MIGRATE_REALITY_TARGET=0
 }
 
 select_releases() {
@@ -427,10 +427,11 @@ if secure_state_file; then
   # shellcheck disable=SC1090
   source "$STATE_FILE"
 
-  if [[ "$SERVER_NAME_SET" -eq 0 && "${REALITY_SERVER_NAME:-}" == "www.microsoft.com" ]]; then
+  if [[ "$SERVER_NAME_SET" -eq 0 && ( "${REALITY_SERVER_NAME:-}" == "www.microsoft.com" ||
+        "${REALITY_SERVER_NAME:-}" == "www.cloudflare.com" ) ]]; then
     REALITY_SERVER_NAME="www.bing.com"
-    MIGRATE_MICROSOFT_TARGET=1
-    log "Migrating the incompatible legacy REALITY target to www.bing.com."
+    MIGRATE_REALITY_TARGET=1
+    log "Migrating the saved REALITY target to www.bing.com; client SNI must also be updated."
   fi
 
   [[ "$XRAY_PORT_SET" -eq 0 ]] || XRAY_PORT="$REQUESTED_XRAY_PORT"
@@ -645,8 +646,9 @@ else
     -e 's/"loglevel"[[:space:]]*:[[:space:]]*"debug"/"loglevel": "warning"/g' \
     -e 's/"show"[[:space:]]*:[[:space:]]*true/"show": false/g' \
     "$XRAY_CONFIG_FILE"
-  if [[ "$MIGRATE_MICROSOFT_TARGET" -eq 1 ]]; then
-    sed -i 's/www\.microsoft\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
+  if [[ "$MIGRATE_REALITY_TARGET" -eq 1 ]]; then
+    sed -i -e 's/www\.microsoft\.com/www.bing.com/g' \
+      -e 's/www\.cloudflare\.com/www.bing.com/g' "$XRAY_CONFIG_FILE"
   fi
   /usr/local/bin/xray run -test -config "$XRAY_CONFIG_FILE"
 fi
