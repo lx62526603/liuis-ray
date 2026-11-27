@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.6.2"
+INSTALLER_VERSION="0.7.0"
 PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -1035,6 +1035,22 @@ pause_menu() {
   read -r _
 }
 
+install_xhttp_option() {
+  local temp result=0
+  temp="$(mktemp -d)" || return 1
+  if curl -fLsS --retry 3 --connect-timeout 15 \
+      "https://raw.githubusercontent.com/lx62526603/liuis-ray/v${CLI_VERSION}/install-xhttp.sh" \
+      -o "$temp/install-xhttp.sh" && bash -n "$temp/install-xhttp.sh"; then
+    bash "$temp/install-xhttp.sh" "$@" || result=$?
+  else
+    warn 'Could not download the optional XHTTP installer; existing services were not changed.'
+    result=1
+  fi
+  rm -f -- "$temp/install-xhttp.sh"
+  rmdir -- "$temp"
+  return "$result"
+}
+
 draw_menu() {
   load_state
   [[ -t 1 ]] && clear
@@ -1060,6 +1076,7 @@ EOF
   9) 更新代理核心
   10) 全新重装（清理旧配置，生成新链接，直接执行）
   11) 卸载清理（直接执行）
+  12) 独立安装/更新 VLESS + XHTTP + REALITY（最新版内核）
   0) 退出
 EOF
 }
@@ -1068,7 +1085,7 @@ menu() {
   [[ -t 0 ]] || die "Interactive menu requires a terminal. Use 'liuisray help'."
   while true; do
     draw_menu
-    printf '\n请选择 [0-11]: '
+    printf '\n请选择 [0-12]: '
     read -r choice || return 0
     case "$choice" in
       1) show_config; pause_menu ;;
@@ -1082,6 +1099,11 @@ menu() {
       9) update_cores; pause_menu ;;
       10) reinstall_services; return $? ;;
       11) if uninstall_services; then return 0; fi; pause_menu ;;
+      12)
+        printf 'TCP 端口（留空：首次随机，更新保留原端口）: '
+        read -r xhttp_port || return 0
+        if [[ -n "$xhttp_port" ]]; then install_xhttp_option install --port "$xhttp_port"; else install_xhttp_option install; fi
+        pause_menu ;;
       0) exit 0 ;;
       *) warn "无效选项：${choice}"; sleep 1 ;;
     esac
@@ -1105,6 +1127,8 @@ Commands:
   uninstall                    Remove managed services, binaries and configs
   bbr                          Enable and verify fq + BBR
   menu                         Open the interactive menu
+  xhttp [install [--port PORT | --random-port] | show | status | logs | restart]
+                               Manage the independent latest-core XHTTP service
 
 Reinstall and uninstall run immediately, without a confirmation prompt.
 EOF
@@ -1122,6 +1146,7 @@ case "${1:-menu}" in
   reinstall) [[ $# -le 2 ]] || die "Use: liuisray reinstall [--yes]"; reinstall_services "${2:-}" ;;
   uninstall) [[ $# -le 2 ]] || die "Use: liuisray uninstall [--yes]"; uninstall_services "${2:-}" ;;
   bbr) enable_bbr ;;
+  xhttp) shift; install_xhttp_option "$@" ;;
   -h|--help|help) usage ;;
   *) usage; exit 1 ;;
 esac

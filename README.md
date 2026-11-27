@@ -15,7 +15,7 @@ apt-get update && apt-get install -y ca-certificates curl
 ```
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash'
 ```
 
 普通升级保留连接凭据。两个运行组件均使用固定版本的官方发行文件，并验证 SHA-256；下载校验通过后才修改现有服务。
@@ -61,7 +61,7 @@ liuisray uninstall
 已有旧版也可以直接执行这一行，无需先进入旧菜单：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash -s -- --reinstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash -s -- --reinstall'
 ```
 
 先下载、校验并检查新组件，再备份旧安装，停止服务，清理本项目旧文件，最后全新安装。地址、节点名称和端口沿用已保存设置，也可通过参数修改；连接凭据、密钥和证书全部重新生成，客户端必须重新导入新链接。
@@ -77,7 +77,7 @@ liuisray uninstall
 旧版本尚无此命令时，也可用新脚本直接卸载：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.6.2/install.sh | bash -s -- --uninstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash -s -- --uninstall'
 ```
 
 与重装使用同一套清理逻辑。系统依赖、系统账户、云平台及本机防火墙规则、系统网络调度设置、公共日志和其他项目文件保留。
@@ -105,6 +105,34 @@ bash install.sh --reinstall --name node-1 --port 443 --hy2-port 443
 服务以独立低权限账户运行，通过服务权限绑定所需端口。安装和重启后会检查短期运行状态及重启次数，避免把刚启动又退出的进程报告为成功。
 
 项目不开放网页控制台或公开管理入口。实现和固定版本见 [`install.sh`](./install.sh)。请在自己拥有或获准管理的设备上使用。
+
+## 可选：VLESS + XHTTP + REALITY
+
+v0.7.0 新增菜单 `12` 和 `liuisray xhttp`，独立安装这条通道。每次安装或更新查询 Xray 官方最新正式版本，并验证官方 SHA-256。使用独立的程序、凭据、配置和 systemd 服务，不修改或重启原有 VLESS/TCP、Hysteria2，也不更改它们的固定版本。
+
+已有旧版安装时，使用下面的命令，只添加新通道，无需重新运行原安装器：
+
+```bash
+bash -c 'set -e; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install-xhttp.sh -o "$f"; bash "$f" install'
+```
+
+首次安装默认随机选择空闲 TCP 端口，更新时保留原端口和凭据。请在云平台防火墙放行输出的 TCP 端口；已启用的 UFW 会自动添加放行规则。新通道默认 SNI 为 `www.cloudflare.com`，原通道的目标不变。
+
+```bash
+liuisray-xhttp install --port 23456
+liuisray-xhttp install --random-port
+liuisray-xhttp install
+liuisray-xhttp show
+liuisray-xhttp status
+liuisray-xhttp logs
+liuisray-xhttp restart
+```
+
+`--port` 指定新端口，`--random-port` 重新随机选择端口，不带参数则保留端口并更新到最新版。改端口后需同步客户端链接和云平台防火墙。可用 `--address` 指定公网 IP/域名，`--server-name` 指定新通道的 SNI。
+
+配置在 `/etc/liuis-ray-xhttp/`，内核在 `/usr/local/lib/liuis-ray-xhttp/`，服务为 `liuis-ray-xhttp.service`。安装前备份到 `/var/backups/liuis-ray-xhttp.*`，服务更新失败时恢复该通道的文件。原菜单的更新、重启和卸载仍只管理原有两条通道。
+
+生成的链接使用 XHTTP，不添加 Vision flow。需要支持 XHTTP 的客户端；普通 Reality 能用不代表支持 XHTTP。请通过 `liuisray-xhttp show` 获取新通道链接，不要复用原通道凭据。
 
 ## License
 
