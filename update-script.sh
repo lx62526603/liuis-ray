@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 CLI_FILE=/usr/local/sbin/liuisray
-SOURCE_URL=https://raw.githubusercontent.com/lx62526603/liuis-ray/main/install.sh
+SOURCE_URL='https://api.github.com/repos/lx62526603/liuis-ray/contents/install.sh?ref=main'
 
 render_manager() (
   local installer="$1" output="$2"
@@ -37,7 +37,8 @@ update_manager() {
     rmdir -- "$temp"
   }
   trap cleanup_update EXIT
-  curl -fLsS --retry 3 --connect-timeout 15 --max-time 90 "$SOURCE_URL" -o "$temp/install.sh"
+  curl -fLsS --retry 3 --connect-timeout 15 --max-time 90 \
+    -H 'Accept: application/vnd.github.raw+json' "$SOURCE_URL" -o "$temp/install.sh"
   render_manager "$temp/install.sh" "$temp/manager"
   bash "$temp/manager" help >/dev/null
   backup="$(mktemp "${CLI_FILE}.backup.XXXXXXXX")"

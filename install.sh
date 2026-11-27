@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.7.3"
+INSTALLER_VERSION="0.7.4"
 PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -1074,7 +1074,8 @@ update_management_script() {
   local temp result=0
   temp="$(mktemp -d)" || return 1
   if curl -fLsS --retry 3 --connect-timeout 15 --max-time 90 \
-      https://raw.githubusercontent.com/lx62526603/liuis-ray/main/update-script.sh \
+      -H 'Accept: application/vnd.github.raw+json' \
+      'https://api.github.com/repos/lx62526603/liuis-ray/contents/update-script.sh?ref=main' \
       -o "$temp/update-script.sh" && bash -n "$temp/update-script.sh"; then
     bash "$temp/update-script.sh" || result=$?
   else
