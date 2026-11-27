@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.7.1"
+INSTALLER_VERSION="0.7.2"
 PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -816,6 +816,8 @@ XRAY_DATA_DIR="/usr/local/share/xray"
 XRAY_LOG_DIR="/var/log/xray"
 XRAY_LOGROTATE="/etc/logrotate.d/xray"
 
+XHTTP_CLI_FILE="/usr/local/sbin/liuisray-xhttp"
+
 green='\033[1;32m'
 yellow='\033[1;33m'
 red='\033[1;31m'
@@ -867,6 +869,10 @@ $(build_hysteria_uri)
   TCP ${XRAY_PORT}
   UDP ${HYSTERIA_PORT}
 EOF
+  if [[ -x "$XHTTP_CLI_FILE" ]]; then
+    printf '\nVLESS + XHTTP + REALITY（独立通道）\n'
+    "$XHTTP_CLI_FILE" show || warn 'Could not read the installed XHTTP link; use liuisray-xhttp show to inspect it.'
+  fi
 }
 
 show_qr() {
@@ -1135,7 +1141,7 @@ Usage: liuisray [COMMAND]
 No command opens the interactive management menu.
 
 Commands:
-  show                         Show both share URIs
+  show                         Show all installed share URIs, including optional XHTTP
   qr [vless|hy2|all]           Show terminal QR codes
   status                       Show services, ports and BBR
   logs [xray|hy2|all]          Show recent logs
