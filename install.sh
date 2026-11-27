@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.7.2"
+INSTALLER_VERSION="0.7.3"
 PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -817,6 +817,7 @@ XRAY_LOG_DIR="/var/log/xray"
 XRAY_LOGROTATE="/etc/logrotate.d/xray"
 
 XHTTP_CLI_FILE="/usr/local/sbin/liuisray-xhttp"
+XHTTP_STATE_FILE="/etc/liuis-ray-xhttp/state.json"
 
 green='\033[1;32m'
 yellow='\033[1;33m'
@@ -905,15 +906,43 @@ service_state() {
   fi
 }
 
+read_xhttp_port() {
+  [[ -r "$XHTTP_STATE_FILE" ]] || return 1
+  python3 - "$XHTTP_STATE_FILE" <<'PY'
+import json,sys
+port=int(json.load(open(sys.argv[1]))['port'])
+assert 1 <= port <= 65535
+print(port)
+PY
+}
+
+show_xhttp_state() {
+  local port
+  if [[ -r "$XHTTP_STATE_FILE" || -x "$XHTTP_CLI_FILE" ]]; then
+    service_state liuis-ray-xhttp.service "XHTTP + REALITY"
+    if port="$(read_xhttp_port 2>/dev/null)"; then
+      printf '  XHTTP TCP port: %s\n' "$port"
+    else
+      printf '  XHTTP port: unavailable (check liuisray-xhttp status)\n'
+    fi
+  else
+    printf '  XHTTP + REALITY  未安装\n'
+  fi
+}
+
 show_status() {
   load_state
+  local xhttp_port
+  xhttp_port="$(read_xhttp_port 2>/dev/null)" || xhttp_port=''
   printf '\n服务状态\n'
   service_state xray.service "Xray"
   service_state hysteria-server.service "Hysteria2"
+  show_xhttp_state
   printf '\n监听端口\n'
   ss -lntup 2>/dev/null |
-    awk -v xp=":${XRAY_PORT}" -v hp=":${HYSTERIA_PORT}" '
-      NR == 1 || ($1 == "tcp" && index($5, xp)) || ($1 == "udp" && index($5, hp))
+    awk -v xp=":${XRAY_PORT}" -v hp=":${HYSTERIA_PORT}" -v xhp=":${xhttp_port}" '
+      NR == 1 || ($1 == "tcp" && $5 ~ (xp "$")) || ($1 == "udp" && $5 ~ (hp "$")) ||
+      ($1 == "tcp" && xhp != ":" && $5 ~ (xhp "$"))
     ' || true
   printf '\nBBR\n'
   printf '  qdisc=%s congestion=%s\n' \
@@ -1085,6 +1114,7 @@ EOF
   printf "${reset}"
   service_state xray.service "Xray"
   service_state hysteria-server.service "Hysteria2"
+  show_xhttp_state
   cat <<'EOF'
 
   1) 查看全部连接链接

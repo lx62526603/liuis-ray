@@ -15,7 +15,7 @@ apt-get update && apt-get install -y ca-certificates curl
 ```
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.2/install.sh | bash'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.3/install.sh | bash'
 ```
 
 普通升级保留连接凭据。两个运行组件均使用固定版本的官方发行文件，并验证 SHA-256；下载校验通过后才修改现有服务。
@@ -64,7 +64,7 @@ liuisray uninstall
 旧版菜单尚无选项 `13` 时，在 root 终端运行下面这一行，仅升级菜单，不执行原安装器：
 
 ```bash
-bash -c 'set -e; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.2/update-script.sh -o "$f"; bash "$f"'
+bash -c 'set -e; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.3/update-script.sh -o "$f"; bash "$f"'
 ```
 
 ## 全新重装
@@ -72,7 +72,7 @@ bash -c 'set -e; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL https:
 已有旧版也可以直接执行这一行，无需先进入旧菜单：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.2/install.sh | bash -s -- --reinstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.3/install.sh | bash -s -- --reinstall'
 ```
 
 先下载、校验并检查新组件，再备份旧安装，停止服务，清理本项目旧文件，最后全新安装。地址、节点名称和端口沿用已保存设置，也可通过参数修改；连接凭据、密钥和证书全部重新生成，客户端必须重新导入新链接。
@@ -88,7 +88,7 @@ liuisray uninstall
 旧版本尚无此命令时，也可用新脚本直接卸载：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.2/install.sh | bash -s -- --uninstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.3/install.sh | bash -s -- --uninstall'
 ```
 
 与重装使用同一套清理逻辑。系统依赖、系统账户、云平台及本机防火墙规则、系统网络调度设置、公共日志和其他项目文件保留。
@@ -146,6 +146,8 @@ liuisray-xhttp restart
 生成的链接使用 XHTTP，不添加 Vision flow。需要支持 XHTTP 的客户端；普通 Reality 能用不代表支持 XHTTP。请通过 `liuisray-xhttp show` 获取新通道链接，不要复用原通道凭据。
 
 v0.7.2 起，菜单 `1` 和 `liuisray show` 会同时展示已安装的独立 XHTTP 通道链接及当前端口；使用菜单 `13` 或 `liuisray update-script` 更新管理脚本即可，无需重新安装通道。
+
+v0.7.3 起，菜单顶部、菜单 `4` 和 `liuisray status` 也展示 XHTTP 服务状态及当前 TCP 端口，状态页列出对应监听记录。未安装时显示“未安装”。
 
 ## License
 
