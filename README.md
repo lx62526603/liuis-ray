@@ -15,7 +15,7 @@ apt-get update && apt-get install -y ca-certificates curl
 ```
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.1/install.sh | bash'
 ```
 
 普通升级保留连接凭据。两个运行组件均使用固定版本的官方发行文件，并验证 SHA-256；下载校验通过后才修改现有服务。
@@ -36,6 +36,8 @@ liuisray
 
 - `10`：全新重装，清理旧程序、配置和凭据，生成新链接。
 - `11`：卸载清理，删除本项目程序、服务和托管文件。
+- `12`：独立安装或更新 XHTTP + REALITY 通道。
+- `13`：更新管理脚本，仅替换菜单脚本，不更新内核、不重启服务、不改配置和凭据。
 - `0`：退出。
 
 重装和卸载选择后直接执行，没有二次确认。
@@ -49,19 +51,28 @@ liuisray status
 liuisray logs all
 liuisray restart
 liuisray update
+liuisray update-script
 liuisray bbr
 liuisray reinstall
 liuisray uninstall
 ```
 
-`update` 安装本版工具固定的组件版本；升级工具本身使用上方安装命令。
+`update` 安装本版工具固定的组件版本；只升级管理菜单时使用 `update-script`，无需重新运行安装器。
+
+`update-script` 从 GitHub `main` 获取最新管理脚本，先校验并备份旧脚本，再原子替换；下载或校验失败时保留原脚本。菜单选项 `13` 完成后自动进入新菜单。
+
+旧版菜单尚无选项 `13` 时，在 root 终端运行下面这一行，仅升级菜单，不执行原安装器：
+
+```bash
+bash -c 'set -e; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.1/update-script.sh -o "$f"; bash "$f"'
+```
 
 ## 全新重装
 
 已有旧版也可以直接执行这一行，无需先进入旧菜单：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash -s -- --reinstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.1/install.sh | bash -s -- --reinstall'
 ```
 
 先下载、校验并检查新组件，再备份旧安装，停止服务，清理本项目旧文件，最后全新安装。地址、节点名称和端口沿用已保存设置，也可通过参数修改；连接凭据、密钥和证书全部重新生成，客户端必须重新导入新链接。
@@ -77,7 +88,7 @@ liuisray uninstall
 旧版本尚无此命令时，也可用新脚本直接卸载：
 
 ```bash
-bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.0/install.sh | bash -s -- --uninstall'
+bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/lx62526603/liuis-ray/v0.7.1/install.sh | bash -s -- --uninstall'
 ```
 
 与重装使用同一套清理逻辑。系统依赖、系统账户、云平台及本机防火墙规则、系统网络调度设置、公共日志和其他项目文件保留。

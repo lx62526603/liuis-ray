@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALLER_VERSION="0.7.0"
+INSTALLER_VERSION="0.7.1"
 PINNED_XRAY_VERSION="26.7.28"
 PINNED_HYSTERIA_VERSION="2.9.2"
 HYSTERIA_VERSION="$PINNED_HYSTERIA_VERSION"
@@ -1035,6 +1035,22 @@ pause_menu() {
   read -r _
 }
 
+update_management_script() {
+  local temp result=0
+  temp="$(mktemp -d)" || return 1
+  if curl -fLsS --retry 3 --connect-timeout 15 --max-time 90 \
+      https://raw.githubusercontent.com/lx62526603/liuis-ray/main/update-script.sh \
+      -o "$temp/update-script.sh" && bash -n "$temp/update-script.sh"; then
+    bash "$temp/update-script.sh" || result=$?
+  else
+    warn 'Could not download the management updater; no files were changed.'
+    result=1
+  fi
+  rm -f -- "$temp/update-script.sh"
+  rmdir -- "$temp"
+  return "$result"
+}
+
 install_xhttp_option() {
   local temp result=0
   temp="$(mktemp -d)" || return 1
@@ -1077,6 +1093,7 @@ EOF
   10) 全新重装（清理旧配置，生成新链接，直接执行）
   11) 卸载清理（直接执行）
   12) 独立安装/更新 VLESS + XHTTP + REALITY（最新版内核）
+  13) 更新管理脚本（只更新菜单，不更新内核或配置）
   0) 退出
 EOF
 }
@@ -1085,7 +1102,7 @@ menu() {
   [[ -t 0 ]] || die "Interactive menu requires a terminal. Use 'liuisray help'."
   while true; do
     draw_menu
-    printf '\n请选择 [0-12]: '
+    printf '\n请选择 [0-13]: '
     read -r choice || return 0
     case "$choice" in
       1) show_config; pause_menu ;;
@@ -1104,6 +1121,7 @@ menu() {
         read -r xhttp_port || return 0
         if [[ -n "$xhttp_port" ]]; then install_xhttp_option install --port "$xhttp_port"; else install_xhttp_option install; fi
         pause_menu ;;
+      13) if update_management_script; then exec "$CLI_FILE" menu; fi; pause_menu ;;
       0) exit 0 ;;
       *) warn "无效选项：${choice}"; sleep 1 ;;
     esac
@@ -1123,6 +1141,7 @@ Commands:
   logs [xray|hy2|all]          Show recent logs
   restart [xray|hy2|all]       Validate and restart services
   update                       Install the pinned runtime components
+  update-script                Update only the management script from main
   reinstall                    Clean and install afresh, with NEW credentials
   uninstall                    Remove managed services, binaries and configs
   bbr                          Enable and verify fq + BBR
@@ -1143,6 +1162,7 @@ case "${1:-menu}" in
   logs) show_logs "${2:-all}" ;;
   restart) restart_services "${2:-all}" ;;
   update) update_cores ;;
+  update-script) update_management_script ;;
   reinstall) [[ $# -le 2 ]] || die "Use: liuisray reinstall [--yes]"; reinstall_services "${2:-}" ;;
   uninstall) [[ $# -le 2 ]] || die "Use: liuisray uninstall [--yes]"; uninstall_services "${2:-}" ;;
   bbr) enable_bbr ;;
